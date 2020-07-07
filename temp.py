@@ -1,6 +1,10 @@
-import sys
-import glob
 import serial.tools.list_ports
+import sys
+import threading
+import time
+
+import pyqtgraph as pg
+from pyqtgraph import PlotWidget, plot
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtWidgets import (QMainWindow,
@@ -34,8 +38,9 @@ class Tab1(QWidget):
         self.pb_send_fr = QPushButton("Send FR")
         self.pb_disconnect = QPushButton("Disconnect")
         self.cb_drop_down = QComboBox()
-        self.ports = self.get_ports()
-        self.current_port = self.ports[0] if self.ports else "" # TODO: this should be dynamic
+        self.ports = []
+        self.current_port = None
+        self.get_ports()
 
         # Add widgets to layout
         self.layout.addLayout(self.get_top_widget_layout())
@@ -45,14 +50,20 @@ class Tab1(QWidget):
         self.setLayout(self.layout)
 
     def get_ports(self):
+        time.sleep(1)
         ports = list(serial.tools.list_ports.comports())
-        if ports:
-            for p in ports: # TODO: Put in thread
-                self.cb_drop_down.addItem(f"{p.name}: {p.manufacturer}")
-        else:
-            self.cb_drop_down.addItem("none")
+        for p in self.ports:
+            if p not in ports:
+                for i in range(self.cb_drop_down.count()):
+                    if self.cb_drop_down.itemData(i) == p:
+                        self.cb_drop_down.removeItem(i)
+                
+        for p in ports:
+            if p not in self.ports:
+                self.cb_drop_down.addItem(f"{p.name}: {p.manufacturer}", p)
 
-        return ports
+        self.ports = ports
+        threading.Timer(1.0, self.get_ports).start()
 
     def get_top_widget_layout(self):
         layout = QGridLayout()
@@ -116,9 +127,9 @@ class Tab1(QWidget):
     def gb_device(self):
         groupBox = QGroupBox("Device")
         layout = QGridLayout()
-        labels = {"Device Type:": self.port.manufacturer if self.ports else "n/a", 
+        labels = {"Device Type:": self.current_port.manufacturer if self.current_port is not None else "n/a", 
                   "Device Variant:": "n/a", 
-                  "Device Serial:": self.port.serial_number if self.ports else "n/a", 
+                  "Device Serial:": self.current_port.serial_number if self.current_port is not None else "n/a", 
                   "Firmware Version:": "n/a", 
                   "Bootloader Edition:": "n/a", 
                   "Bootloader FW Version:": "n/a"}
@@ -341,10 +352,19 @@ class Tab3(QWidget):
         self.D = QLineEdit()
         self.I_lim = QLineEdit()
         self.acc_lim = QLineEdit()
-        self.max_step_change = QLineEdit()
+        self.max_step_change = QSpinBox()
+        self.prescaler_checkbox = QCheckBox()
+        self.P_checkbox = QCheckBox()
+        self.I_checkbox = QCheckBox()
+        self.D_checkbox = QCheckBox()
+        self.I_lim_checkbox = QCheckBox()
+        self.acc_lim_checkbox = QCheckBox()
+        self.max_step_change_checkbox = QCheckBox()
 
-        self.target_source = QLineEdit()
-        self.uart_magnitude = QLineEdit()
+        self.target_source = QSpinBox()
+        self.uart_magnitude = QSpinBox()
+        self.target_source_checkbox = QCheckBox()
+        self.uart_magnitude_checkbox = QCheckBox()
 
         self.read_configs = QPushButton("Read Configs")
         self.write_configs = QPushButton("Write Configs")
@@ -359,9 +379,9 @@ class Tab3(QWidget):
         self.bold.setBold(True)
         # Add widgets to layout
         layout.addLayout(self.get_left_layout())
-        # layout.addStretch(1)
+        layout.addSpacing(30)
         layout.addLayout(self.get_center_layout())
-        layout.addLayout(self.get_right_layout())
+        layout.addWidget(self.get_right_layout())
 
         # Set layout
         self.setLayout(layout)
@@ -388,6 +408,7 @@ class Tab3(QWidget):
         i = 0
         for label, widget in top_widgets.items():
             top_grid.addWidget(QLabel(label), i, 0)
+            widget.setReadOnly(True)
             top_grid.addWidget(widget, i, 1)
             i += 1
 
@@ -416,21 +437,22 @@ class Tab3(QWidget):
         header1.setFont(self.bold)
         layout.addWidget(header1)
         
-        top_widgets = {"Prescaler": self.prescaler,
-                       "Proportional": self.P,
-                       "Integral": self.I,
-                       "Differential": self.D,
-                       "Integral Limit": self.I_lim,
-                       "Acceleration Limit": self.acc_lim,
-                       "Max Step Change": self.max_step_change}
+        top_widgets = {"Prescaler": [self.prescaler, self.prescaler_checkbox],
+                       "Proportional": [self.P, self.P_checkbox],
+                       "Integral": [self.I, self.I_checkbox],
+                       "Differential": [self.D, self.D_checkbox],
+                       "Integral Limit": [self.I_lim, self.I_lim_checkbox],
+                       "Acceleration Limit": [self.acc_lim, self.acc_lim_checkbox],
+                       "Max Step Change": [self.max_step_change, self.max_step_change_checkbox]}
         
-        bottom_widgets = {"Target Source": self.target_source,
-                          "UART Magniture": self.uart_magnitude}
+        bottom_widgets = {"Target Source": [self.target_source, self.target_source_checkbox],
+                          "UART Magniture": [self.uart_magnitude, self.uart_magnitude_checkbox]}
 
         i = 0
         for label, widget in top_widgets.items():
             top_grid.addWidget(QLabel(label), i, 0)
-            top_grid.addWidget(widget, i, 1)
+            top_grid.addWidget(widget[0], i, 1)
+            top_grid.addWidget(widget[1], i, 2)
             i += 1
 
         layout.addLayout(top_grid)
@@ -442,7 +464,8 @@ class Tab3(QWidget):
         i = 0
         for label, widget in bottom_widgets.items():
             bottom_grid.addWidget(QLabel(label), i, 0)
-            bottom_grid.addWidget(widget, i, 1)
+            bottom_grid.addWidget(widget[0], i, 1)
+            bottom_grid.addWidget(widget[1], i, 2)
             i += 1
 
         layout.addLayout(bottom_grid)
@@ -450,11 +473,77 @@ class Tab3(QWidget):
         return layout
 
     def get_right_layout(self):
-        pass
+        group_box = QGroupBox("Handle Configs")
+        right_vbox = QVBoxLayout()
+        right_vbox.addStretch(1)
+
+        buttons = {"Read Configs":self.handle_read_configs,
+                   "Write Configs":self.handle_write_configs,
+                   "Save Configs":self.handle_save_configs,
+                   "Restore Configs":self.handle_restore_configs,
+                   "Restore Defaults":self.handle_restore_defaults,
+                   "Factory Reset":self.handle_factory_reset}
+
+        for key, value in buttons.items():
+            pb = QPushButton(key)
+            right_vbox.addWidget(pb)
+            pb.clicked.connect(value)
+
+            if key == "Write Configs":
+                hbox = QHBoxLayout()
+                hbox.addStretch(1)
+                hbox.addWidget(self.write_all_checkbox)
+                hbox.addWidget(QLabel("Write to All"))
+                hbox.addStretch(1)
+                right_vbox.addLayout(hbox)
+
+        right_vbox.addStretch(1)
+        group_box.setLayout(right_vbox)
+
+        return group_box
+
+    def handle_read_configs(self):
+        print("read_configs")
+    
+    def handle_write_configs(self):
+        if self.write_all_checkbox.isChecked():
+            print("write all configs")
+        else:
+            print("write not all configs")
+    
+    def handle_save_configs(self):
+        print("save_configs")
+    
+    def handle_restore_configs(self):
+        print("restore_configs")
+    
+    def handle_restore_defaults(self):
+        print("restore_defaults")
+    
+    def handle_factory_reset(self):
+        print("factory_reset")    
     
 class Tab4(QWidget):
     def __init__(self):
         super().__init__()        
+         # Main layout
+        layout = QHBoxLayout()
+
+        # Widgets
+        self.graph = pg.PlotWidget()
+        self.handle_graph()
+
+        # Add widgets to layout
+        layout.addWidget(self.graph)
+
+        self.setLayout(layout)
+
+    def handle_graph(self):
+        self.graph.setBackground('w')
+        pen = pg.mkPen(color=(157, 176, 237), width=3)
+        hour = [1,2,3,4,5,6,7,8,9,10]
+        temperature = [30,32,34,32,33,31,29,32,35,45]
+        self.graph.plot(hour, temperature, pen=pen)
         
 class App(QMainWindow):
 
