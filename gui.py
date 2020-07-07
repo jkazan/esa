@@ -1,5 +1,4 @@
 import sys
-
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtWidgets import (QMainWindow,
